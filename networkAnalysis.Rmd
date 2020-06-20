@@ -1,0 +1,421 @@
+---
+title: "September 11th Terrorist Network Analysis"
+author: "Marc Petta"
+date:
+output:
+  html_document: default
+  word_document: default
+---
+
+## Introduction 
+The analysis to follow seeks to determine characteristics of the terrorist network that was responsible for the attacks on the United States on September 11th, 2001. Additionally, a section is included which attempts to model the network to determine if predictions can be made based on the modeled data.
+
+### Load data and output csv of vertices and edges
+```{r, message=FALSE}
+
+# repeated calls to libraries occur throughout to avoid dependency conflicts
+library(statnet) 
+
+# load the rda file
+load(file = "Krebs.rda")
+# supplement existing dataset
+Krebs %v% "Age" = c(24,29,26,20,25,23,21,20,26,22,20,22,24,23,33,22,22,28,25)
+Krebs %v% "Suadi" = c(1,1,1,1,1,1,1,1,0,1,1,1,0,0,0,1,1,1,1)
+Krebs %v% "Pilot" = c(0,1,0,0,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0)
+Krebs %v% "alldeg" = degree(Krebs)
+
+# set up
+library(igraph)
+library(intergraph)
+
+# converts into igraph object
+krebs_graph<-asIgraph(Krebs)
+# extract data frames with node and edge info
+krebs.v.df = as_data_frame(krebs_graph,what="vertices")
+krebs.e.df = as_data_frame(krebs_graph,what="edges")
+# write CSV files 
+write.csv(krebs.v.df,file="krebs_v.csv") #Vertices 
+write.csv(krebs.e.df,file="krebs_e.csv") #Edges
+
+```
+
+
+## Visualization and Network Summary:
+Review some characteristics of the network
+```{r, message=FALSE}
+
+# switch libraries
+detach(package:igraph)
+library(intergraph)
+library(statnet)
+
+# get network size
+network.size(Krebs)
+
+# gey density
+gden(Krebs)
+
+```
+
+Density is the proportion of observed ties (also called edges, arcs, or relations) in a network to the maximum number of possible ties. Thus, density is a ratio that can range from 0 to 1. The closer to 1 the density is, the more interconnected is the network. We find here a density of 0.15789. This shows a lower proportion of observed ties. We find a network size of 19. 
+
+
+```{r}
+# get diameter
+lgc <- component.largest(Krebs,result="graph") 
+gd <- geodist(lgc) 
+max(gd$gdist)
+
+```
+
+The diameter of a network is a useful measure of this compactness. A path is the series of steps required to go from node A to node B in a network. The shortest path is the shortest number of steps required. The diameter then for an entire network is the longest of the shortest paths across all pairs of nodes. This is a measure of compactness or network efficiency in that the diameter reflects the ‘worst case scenario’ for sending information (or any other resource) across a network.
+
+```{r, warning=FALSE}
+# get clustering/transitivity 
+gtrans(Krebs,mode="graph")
+
+```
+
+We find clustering or transitivity to be the proportion of closed triangles (triads where all three ties are observed) to the total number of open and closed triangles (triads where either two or all three ties are observed). Thus, like density, transitivity is a ratio that can range from 0 to 1.
+
+Lets start to visualize the network and see if we are able to optimize that visualization.
+
+```{r}
+# plot the network using defaults
+gplot(Krebs, vertex.col = 2, displaylabels = TRUE)
+
+```
+
+This plot provides the defualt visualization from the networks package. We can examine some ways to improve this visualization
+
+```{r}
+# take a look at the attributes in the network object
+list.vertex.attributes(Krebs)
+
+# review what those attributes contain
+get.vertex.attribute(Krebs, "flight")
+get.vertex.attribute(Krebs, "name")
+
+```
+
+Examine different methods to plot the network 
+
+```{r}
+
+op <- par(mar = rep(0, 4),mfrow=c(1,2)) 
+# produce the plot using the circle method
+plot(Krebs,mode="circle",vertex.cex=1.5, main="Circle Method")
+# produce the plot using the Fruchterman-Reingold algorithm
+plot(Krebs,mode="fruchtermanreingold",vertex.cex=1.5, main="Fruchterman-Reingold") 
+par(op)
+
+
+```
+
+We find here that utilizing the Fruchterman-Reingold algorithm to plot the network illustrates its entirety well. Let's now compare another plotting method against the more appropriate Fruchterman-Reingold algorithm
+
+```{r}
+
+op <- par(mar = c(0,0,4,0),mfrow=c(1,2)) 
+gplot(Krebs,gmode="graph",mode="random", vertex.cex=1.5,main="Random layout")
+gplot(Krebs,gmode="graph",mode="fruchtermanreingold", vertex.cex=1.5,main="Fruchterman-Reingold")
+par(op)
+
+```
+
+We see from the examinations above that applying either attribute flight or name can improve the visualization of the network. Additionally, utilizing the Fruchterman-Reingold algorithm will assist in the understanding of the visualization.
+
+A more important use of color is to communicate some characteristic of the node or network by having different nodes have different colors. Specifically, information stored in a categorical node attribute can often be communicated through judicious node color choices.
+
+```{r}
+# get list of attribute "flight" for plotting
+flight_lab <- get.vertex.attribute(Krebs,"flight") 
+# get list of names 
+names_lab <- get.vertex.attribute(Krebs,"name") 
+# set up output parameters
+op <- par(mar=c(0,0,0,0)) 
+# plot the krebs network with flights labeled and colored
+plot(Krebs,usearrows=FALSE,vertex.cex=1.5,label=names_lab, displaylabels=T,vertex.col="flight")
+par(op)
+
+```
+
+We see further improvement in the visualization. One final improvement can be in the color pallette used. We can use a custom pallete with the RColorBrewer library.
+
+```{r}
+library(RColorBrewer) 
+# take a look at some avaialbe palletes. This will select 4 colors from the larger Set3 pallette
+display.brewer.pal(4, "Set3")
+
+```
+
+Add the newly selected color pallette to the plot. To do so we must ensure the vertex is formatted as an factor. The indexing works with factors or numeric vectors, but not character vectors
+
+```{r}
+# create objet with chosen pallette
+my_pal <- brewer.pal(4,"Set3") 
+# set flight attribute as factor
+flight_cat <- as.factor(get.vertex.attribute(Krebs,"flight"))
+# plot network to review
+plot(Krebs,vertex.cex=1.5,label=names_lab, displaylabels=T,vertex.col=my_pal[flight_cat])
+
+```
+
+Node size can also be used to improve the network visualization. We will calculate three different measures of node centrality to apply to the plot.
+
+```{r}
+# get node-level vector of quantitative information
+# assign degree to an object
+deg <- degree(Krebs,gmode="graph")
+# assign closeness to an object
+cls <- closeness(Krebs,gmode="graph") 
+# assign betweenness to an object
+bet <- betweenness(Krebs,gmode="graph") 
+# compare plots for degree
+op <- par(mar = c(0,0,2,1),mfrow=c(1,2)) 
+# plot the "raw" values of deg
+plot(Krebs,usearrows=T,vertex.cex=deg,main="Raw")
+# plot the log of deg values
+plot(Krebs,usearrows=FALSE,vertex.cex=log(deg), main="Adjusted")
+par(op)
+
+```
+
+Now that we have determined the parameters we can apply to optimize the plot, the follwoing will produce that optimized visualization.
+
+```{r}
+
+# plot network with the color pallette, centrality information for node size, and a legend
+plot(Krebs,vertex.cex=deg,label=names_lab, displaylabels=T, label.cex=0.5, pad=0.4,label.col="darkblue", vertex.col=my_pal[flight_cat])
+legend("bottomleft",legend=c("AA-77","UA-93","UA-175","AA-11"),
+col=my_pal,pch=19,pt.cex=1.0,bty="n", title="Flight Number", cex = 0.6)
+
+```
+
+We can see there are a few actors in the network that are slighty more powerful given there centrality information. We can see distinctive groups from each color indicating which flight and what actors interacted between those flights. Next, lets take a more advaced look at possible sub groups and communities.
+
+```{r}
+# determine which actor has the highest degree
+# list names as reminder
+Krebs %v% 'vertex.names'
+# calcualte degree for each
+degree(Krebs, gmode="graph")
+
+```
+
+We can see that actors Nawaf Alhazmi and Hamza Alghamdi have the highest degrees. This too is illustrated in the plot. Next we will take a look at closeness and betweenness.
+
+```{r}
+# calculate closeness for each 
+closeness(Krebs, gmode="graph")
+# calculate betweeness for each
+betweenness(Krebs, gmode="graph")
+
+```
+
+We find the actor with the highest closeness to be Hamza Alghamdi. The actor with the highest betweeness is also Hamza Alghamdi followed closely behind by Nawaf Alhazmi. 
+
+## Community Detection 
+
+### Sub groups
+Next, we will take a look at some of the simplest types of cohesive subgroups. Lets examine the network first for cliques.
+
+```{r, message=FALSE}
+# to do so we will need to switch over to the igraph package using the object we created previously
+# switch libraries to avoid dependency conflicts
+detach(package:statnet)
+library(igraph)
+library(intergraph)
+
+# calcualte all cliques with a minimum of four
+cliques(krebs_graph, min=4)
+
+# calcualte  the largest clique
+largest.cliques(krebs_graph)
+
+```
+
+We find the largest clique within the network to be Nawaf Alhazmi, Ahmed Alnami, Saeed Alghamdi, and Hamza Alghamdi. This subgroup contains the induviduals indentified earlier whilst examining betweeness and closeness. As cliques are useful here, they simply are not very common in larger social networks. As such, we will explore others methods to determine communities.
+
+### Communities
+
+```{r}
+# assign an object representing clusters from the walk trap algorithm
+cw <- cluster_walktrap(krebs_graph) 
+# get membership
+membership(cw)
+# get modularity
+modularity(cw)
+
+```
+
+We will consider the modularity high and we can see from the membership calculation that theres was found to be four different sub groups. A plot of this information will help illustrate.
+
+```{r}
+# plot communities
+ plot(cw, krebs_graph)
+
+```
+
+We see here the distinct subgroups found by the cluster walk trap algorithm. Lets examine some additional methods.
+
+```{r}
+#Springlass
+cs <- cluster_spinglass(krebs_graph) 
+modularity(cs)
+membership(cs)
+#Fast-greedy
+cfg <- cluster_fast_greedy(krebs_graph)
+modularity(cfg) 
+membership(cfg)
+#Leading eigenvector
+cle <- cluster_leading_eigen(krebs_graph)
+modularity(cle)
+membership(cle)
+
+```
+
+These results show that all the detection algorithms identify either two or five subgroups. Modularity ranges from about 0.46 to 0.50. Lets take a look at the plots from each of these algorithms.
+
+```{r, fig.width=5, fig.height=5}
+op <- par(mfrow=c(2,2),mar=c(2,0,2,0)) 
+plot(cw, krebs_graph,vertex.label=V(krebs_graph)$flight,
+main="Walktrap")
+plot(cs, krebs_graph,vertex.label=V(krebs_graph)$flight,
+main="Springlass")
+plot(cfg, krebs_graph,vertex.label=V(krebs_graph)$flight,
+main="Fast-greedy")
+plot(cle, krebs_graph,vertex.label=V(krebs_graph)$flight,
+main="Leading Eigenvector")
+
+```
+
+The plot above illustrates well the difference in the groups found by the algorithm. The nodes were labeled by flight as that would be assumed to be one possible manner of forming groups. We can see that not all groups are formed by flights though. We do see the groups of four and five formed by each. 
+
+## Network Modeling
+
+Exponential-family random graph models will be used to further analyze the network.
+```{r, message=FALSE}
+# to do so we will need to switch over to the statnet package using the object we created previously
+# switch libraries to avoid dependency conflicts
+detach(package:igraph)
+library(statnet)
+library(intergraph)
+
+# fit ergm model to see what impact the flight attribute has on connections in the network
+library(ergmharris)
+null_model <-ergm(Krebs ~ edges)
+summary(null_model)
+
+```
+
+Lets see how the model with only edges performed. The following will simulate the network from the model.
+
+```{r}
+# set up simulation
+simtrinull<-simulate( null_model, nsim = 100, monitor=~triangles, statsonly=TRUE, control=control.simulate.ergm(MCMC.burnin=1000, MCMC.interval=1000), seed=567)
+krebs.tri <- summary( Krebs~triangle ) 
+#dev.off()
+# plot results
+par( mar = c( 4,4,1,1 ), cex.main = .9, cex.lab = .9,cex.axis = .75 )
+hist(simtrinull[,2], xlim=c(0,9), col='coral', main="", xlab="Number of triangles", ylab="Number of simulations") 
+points(krebs.tri,3, pch="X", cex=2)
+
+```
+
+After 100 simulations of the network based on the null model, we find that the null model did not quite capture the amount of triangles in the network, which was nine. Lets take a look at some more complex models to see if we can find a better fit.
+
+Lets compare some models to see if we can find significant variables that assist in predicting the connection between two terrorist “nodes”. 
+
+It is the hypothesis herein that age and whether or not one is a pilot are significant variables in predicting the connection between two terrorist “nodes”. 
+
+```{r, warning=FALSE, message=FALSE}
+# fit model and summarize
+age_effects <-ergm(Krebs ~edges +nodecov('Age'))
+summary(age_effects)
+
+```
+
+
+```{r, message=FALSE}
+# fit model and summarize
+age_origin_effects <-ergm(Krebs ~edges +nodecov('Age') +nodecov('Suadi'))
+summary(age_origin_effects)
+
+```
+
+
+```{r, message=FALSE}
+# fit model and summarize
+age_origin_pilot_effects <-ergm(Krebs ~edges +nodecov('Age') +nodecov('Suadi') +nodecov('Pilot'))
+summary(age_origin_pilot_effects)
+
+```
+
+```{r, message=FALSE}
+# fit model and summarize
+pilot_Age_effects <-ergm(Krebs ~edges +nodecov('Pilot') +nodecov('Age'))
+summary(pilot_Age_effects)
+
+```
+
+We do not find performance enhancements thru any iteration of the model as exhibited by the increasing AIC in each successive model. Lets look further by fitting new models and running simulations.
+
+```{r, message=FALSE}
+# fit model and summarize
+null_model <-ergm(Krebs ~ edges) #Null Model
+nullsim <- simulate(null_model, verbose = TRUE,seed = 5) #Simulations based on Null model
+mainsim <- simulate(pilot_Age_effects, verbose = TRUE, seed = 5) #Simulations based on pilot and age effect model
+rowgof <- rbind(summary(Krebs ~ edges + degree(0:5) + triangle),
+summary(nullsim ~ edges + degree(0:5) + triangle), summary(mainsim ~ edges + degree(0:5) + triangle))
+rownames(rowgof) <- c("Krebs", "Null", "Pilot Age effects")
+rowgof
+
+```
+
+We do find the pilot age effect model capturing more edges than the null model. Similarly, we fnd that it captures more triangles as well. Next lets take a look more at how the model did with goodness of fit.
+
+```{r, warning=FALSE, message=FALSE}
+
+diff2_gof <- gof( pilot_Age_effects, GOF = ~degree + espartners + dspartners, verbose = T, burnin = 10000, interval = 10000 )
+diff2_gof
+
+```
+
+
+```{r, fig.height=8, fig.width=8}
+# plot results
+par( mfrow = c( 3,2 ) )
+plot( diff2_gof, cex.lab = 1.5, cex.axis = 1.5 ) 
+plot(diff2_gof, cex.lab = 1.5, cex.axis = 1.5, plotlogodds = T )
+
+
+```
+Illustrated here is model performance, which can see is acceptable for degree. The model captured well degree and dyad wise shared partners. Where we can see it has had some issues is with capturing edge wise shared partners. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
